@@ -69,7 +69,7 @@ abstract class SiteActivityBase : ComponentActivity() {
         setupWebView()
         applyImmersiveMode()
 
-        clearWebViewData()
+        if (site.autoClean) clearWebViewData()
         webView.loadUrl(site.url)
     }
 
@@ -174,7 +174,11 @@ abstract class SiteActivityBase : ComponentActivity() {
     }
 
     private fun showSettingsDialog() {
-        val options = arrayOf("Pin to home screen", "Edit site", "Clear data & restart", "Close")
+        val autoCleanLabel = if (site.autoClean) "Auto-clean: ON (tap to turn off)"
+        else "Auto-clean: OFF (tap to turn on)"
+        val options = arrayOf(
+            "Pin to home screen", "Edit site", autoCleanLabel, "Clear data & restart", "Close"
+        )
         AlertDialog.Builder(this)
             .setTitle(site.title)
             .setItems(options) { _, which ->
@@ -187,10 +191,13 @@ abstract class SiteActivityBase : ComponentActivity() {
                     }
                     1 -> promptEditSite()
                     2 -> {
+                        store.setAutoClean(site.id, !site.autoClean)?.let { site = it }
+                    }
+                    3 -> {
                         clearWebViewData()
                         webView.loadUrl(site.url)
                     }
-                    3 -> finish()
+                    4 -> finish()
                 }
             }
             .show()
@@ -248,8 +255,10 @@ abstract class SiteActivityBase : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        clearWebViewData()
-        webView.destroy()
+        if (::site.isInitialized && ::webView.isInitialized) {
+            if (site.autoClean) clearWebViewData()
+            webView.destroy()
+        }
         super.onDestroy()
         Process.killProcess(Process.myPid())
     }

@@ -9,6 +9,7 @@ import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -50,9 +51,11 @@ class LauncherActivity : ComponentActivity() {
             setPadding(0, 0, 0, dp(8))
         })
         container.addView(TextView(this).apply {
-            text = "Each site below runs isolated, fully wiped on close. Tap to open; " +
-                "long-press to remove. A home-screen shortcut is optional and created " +
-                "automatically once the site's icon is ready."
+            text = "Each site below runs isolated from the others. By default its browser " +
+                "state (cookies, login, etc.) is preserved between opens — enable " +
+                "auto-clean per-site to wipe it on every open/close instead. Tap a site " +
+                "to open; long-press to remove. A home-screen shortcut is optional and " +
+                "created automatically once the site's icon is ready."
             setTextColor(Color.LTGRAY)
             setPadding(0, 0, 0, dp(16))
         })
@@ -62,8 +65,9 @@ class LauncherActivity : ComponentActivity() {
         })
 
         store.listSites().forEach { site ->
+            val cleanState = if (site.autoClean) "auto-clean" else "state preserved"
             container.addView(TextView(this).apply {
-                text = "${site.title}\n${site.url}"
+                text = "${site.title}\n${site.url}  ·  $cleanState"
                 setTextColor(Color.WHITE)
                 setPadding(0, dp(16), 0, dp(16))
                 gravity = Gravity.CENTER_VERTICAL
@@ -104,12 +108,17 @@ class LauncherActivity : ComponentActivity() {
             hint = "https://example.com"
             inputType = InputType.TYPE_TEXT_VARIATION_URI
         }
+        val autoCleanCheckbox = CheckBox(this).apply {
+            text = "Auto-clean browser state on open/close"
+            isChecked = false
+        }
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val pad = dp(16)
             setPadding(pad, pad, pad, pad)
             addView(titleInput)
             addView(urlInput)
+            addView(autoCleanCheckbox)
         }
         AlertDialog.Builder(this)
             .setTitle("Add a site")
@@ -118,21 +127,23 @@ class LauncherActivity : ComponentActivity() {
             .setPositiveButton("Create") { _, _ ->
                 val title = titleInput.text.toString().trim()
                 val url = normalizeUrl(urlInput.text.toString())
-                if (title.isNotEmpty() && url != null) createSite(title, url)
+                if (title.isNotEmpty() && url != null) {
+                    createSite(title, url, autoCleanCheckbox.isChecked)
+                }
             }
             .show()
     }
 
-    private fun createSite(title: String, url: String) {
-        val site = store.addSite(title, url, SiteStore.MAX_SLOTS)
+    private fun createSite(title: String, url: String, autoClean: Boolean = false) {
+        val site = store.addSite(title, url, SiteStore.MAX_SLOTS, autoClean)
         if (site != null) {
             openSite(site)
             return
         }
-        promptReplaceSite(title, url)
+        promptReplaceSite(title, url, autoClean)
     }
 
-    private fun promptReplaceSite(title: String, url: String) {
+    private fun promptReplaceSite(title: String, url: String, autoClean: Boolean) {
         val existing = store.listSites()
         val labels = existing.map { "${it.title} (${it.url})" }.toTypedArray()
         AlertDialog.Builder(this)
@@ -141,7 +152,7 @@ class LauncherActivity : ComponentActivity() {
                 val old = existing[which]
                 getSystemService(ShortcutManager::class.java)
                     ?.disableShortcuts(listOf(old.id), "Site replaced")
-                val newSite = store.replaceSite(old.id, title, url)
+                val newSite = store.replaceSite(old.id, title, url, autoClean)
                 if (newSite != null) openSite(newSite)
             }
             .setNegativeButton("Cancel", null)

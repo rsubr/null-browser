@@ -2,7 +2,13 @@ package com.example.incognitowebview
 
 import android.content.Context
 
-data class Site(val id: String, val title: String, val url: String, val slot: Int)
+data class Site(
+    val id: String,
+    val title: String,
+    val url: String,
+    val slot: Int,
+    val autoClean: Boolean = false,
+)
 
 class SiteStore(context: Context) {
 
@@ -18,7 +24,8 @@ class SiteStore(context: Context) {
         val url = prefs.getString("$id.url", null) ?: return null
         val slot = prefs.getInt("$id.slot", -1)
         if (slot < 0) return null
-        return Site(id, title, url, slot)
+        val autoClean = prefs.getBoolean("$id.autoClean", false)
+        return Site(id, title, url, slot, autoClean)
     }
 
     private fun findFreeSlot(maxSlots: Int): Int? {
@@ -29,22 +36,28 @@ class SiteStore(context: Context) {
         return null
     }
 
-    fun addSite(title: String, url: String, maxSlots: Int): Site? {
+    fun addSite(title: String, url: String, maxSlots: Int, autoClean: Boolean = false): Site? {
         val slot = findFreeSlot(maxSlots) ?: return null
-        return writeSite(java.util.UUID.randomUUID().toString(), title, url, slot)
+        return writeSite(java.util.UUID.randomUUID().toString(), title, url, slot, autoClean)
     }
 
     /** Replaces whatever occupies [oldId]'s slot with a brand-new site (new id, same slot). */
-    fun replaceSite(oldId: String, title: String, url: String): Site? {
+    fun replaceSite(oldId: String, title: String, url: String, autoClean: Boolean = false): Site? {
         val old = getSite(oldId) ?: return null
         removeSite(oldId)
-        return writeSite(java.util.UUID.randomUUID().toString(), title, url, old.slot)
+        return writeSite(java.util.UUID.randomUUID().toString(), title, url, old.slot, autoClean)
     }
 
     /** Updates an existing site's title/url in place, keeping its id and slot (and pinned shortcut) intact. */
     fun updateSite(id: String, title: String, url: String): Site? {
         val existing = getSite(id) ?: return null
-        return writeSite(id, title, url, existing.slot)
+        return writeSite(id, title, url, existing.slot, existing.autoClean)
+    }
+
+    /** Toggles whether this site's browser state is wiped automatically on open/close. */
+    fun setAutoClean(id: String, autoClean: Boolean): Site? {
+        val existing = getSite(id) ?: return null
+        return writeSite(id, existing.title, existing.url, existing.slot, autoClean)
     }
 
     fun removeSite(id: String) {
@@ -59,10 +72,11 @@ class SiteStore(context: Context) {
             .remove("$id.title")
             .remove("$id.url")
             .remove("$id.slot")
+            .remove("$id.autoClean")
             .commit()
     }
 
-    private fun writeSite(id: String, title: String, url: String, slot: Int): Site {
+    private fun writeSite(id: String, title: String, url: String, slot: Int, autoClean: Boolean): Site {
         val ids = (prefs.getStringSet(KEY_SITE_IDS, emptySet()) ?: emptySet()).toMutableSet()
         ids.add(id)
         // commit(), not apply() — see removeSite() for why this must be synchronous.
@@ -71,8 +85,9 @@ class SiteStore(context: Context) {
             .putString("$id.title", title)
             .putString("$id.url", url)
             .putInt("$id.slot", slot)
+            .putBoolean("$id.autoClean", autoClean)
             .commit()
-        return Site(id, title, url, slot)
+        return Site(id, title, url, slot, autoClean)
     }
 
     companion object {
