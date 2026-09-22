@@ -7,6 +7,9 @@ import android.content.pm.PackageManager
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
@@ -18,6 +21,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
@@ -35,6 +39,8 @@ abstract class SiteActivityBase : ComponentActivity() {
     private lateinit var webView: WebView
     private lateinit var store: SiteStore
     private lateinit var site: Site
+    private var lastIcon: Bitmap? = null
+    private var pinRequested = false
 
     private val requestPermissions =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
@@ -91,6 +97,18 @@ abstract class SiteActivityBase : ComponentActivity() {
             displayZoomControls = false
         }
 
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                // Many sites (e.g. SVG-only favicons) never trigger onReceivedIcon, which would
+                // otherwise leave a site with no shortcut ever requested. Fall back to a
+                // generated icon a few seconds after the page settles if no favicon showed up.
+                webView.postDelayed({
+                    if (lastIcon == null) updateSiteShortcut(generateFallbackIcon(site.title))
+                }, 4000)
+            }
+        }
+
         webView.webChromeClient = object : WebChromeClient() {
             override fun onPermissionRequest(request: PermissionRequest) {
                 val granted = request.resources.filter { resource ->
@@ -117,7 +135,25 @@ abstract class SiteActivityBase : ComponentActivity() {
     private fun hasPermission(permission: String): Boolean =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
-    private fun updateSiteShortcut(favicon: Bitmap) {
+    private fun generateFallbackIcon(title: String): Bitmap {
+        val size = 192
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.rgb(0x37, 0x47, 0x4F))
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = size * 0.5f
+            textAlign = Paint.Align.CENTER
+        }
+        val letter = title.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        val metrics = textPaint.fontMetrics
+        val y = size / 2f - (metrics.ascent + metrics.descent) / 2f
+        canvas.drawText(letter, size / 2f, y, textPaint)
+        return bitmap
+    }
+
+    private fun updateSiteShortcut(icon: Bitmap) {
+        lastIcon = icon
         val shortcutManager = getSystemService(ShortcutManager::class.java) ?: return
         val launchIntent = Intent(this, this.javaClass).apply {
             action = Intent.ACTION_MAIN
@@ -125,29 +161,36 @@ abstract class SiteActivityBase : ComponentActivity() {
         }
         val shortcut = ShortcutInfo.Builder(this, site.id)
             .setShortLabel(site.title)
-            .setIcon(Icon.createWithAdaptiveBitmap(favicon))
+            .setIcon(Icon.createWithAdaptiveBitmap(icon))
             .setIntent(launchIntent)
             .build()
 
         if (shortcutManager.pinnedShortcuts.any { it.id == site.id }) {
             shortcutManager.updateShortcuts(listOf(shortcut))
-        } else if (shortcutManager.isRequestPinShortcutSupported) {
+        } else if (!pinRequested && shortcutManager.isRequestPinShortcutSupported) {
+            pinRequested = true
             shortcutManager.requestPinShortcut(shortcut, null)
         }
     }
 
     private fun showSettingsDialog() {
-        val options = arrayOf("Edit site", "Clear data & restart", "Close")
+        val options = arrayOf("Pin to home screen", "Edit site", "Clear data & restart", "Close")
         AlertDialog.Builder(this)
             .setTitle(site.title)
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> promptEditSite()
-                    1 -> {
+                    0 -> {
+                        // Explicit user retry: allow re-prompting even if a previous
+                        // requestPinShortcut was dismissed without being accepted.
+                        pinRequested = false
+                        updateSiteShortcut(lastIcon ?: generateFallbackIcon(site.title))
+                    }
+                    1 -> promptEditSite()
+                    2 -> {
                         clearWebViewData()
                         webView.loadUrl(site.url)
                     }
-                    2 -> finish()
+                    3 -> finish()
                 }
             }
             .show()

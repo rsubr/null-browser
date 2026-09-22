@@ -50,23 +50,28 @@ class SiteStore(context: Context) {
     fun removeSite(id: String) {
         val ids = (prefs.getStringSet(KEY_SITE_IDS, emptySet()) ?: emptySet()).toMutableSet()
         ids.remove(id)
+        // commit() (synchronous) is required here, not apply(): the caller is about to spin up a
+        // brand-new OS process for a different site slot, and that process reads this same
+        // SharedPreferences file from disk on first access. apply()'s async write can otherwise
+        // lose the race, so the new process finds nothing and immediately finishes.
         prefs.edit()
             .putStringSet(KEY_SITE_IDS, ids)
             .remove("$id.title")
             .remove("$id.url")
             .remove("$id.slot")
-            .apply()
+            .commit()
     }
 
     private fun writeSite(id: String, title: String, url: String, slot: Int): Site {
         val ids = (prefs.getStringSet(KEY_SITE_IDS, emptySet()) ?: emptySet()).toMutableSet()
         ids.add(id)
+        // commit(), not apply() — see removeSite() for why this must be synchronous.
         prefs.edit()
             .putStringSet(KEY_SITE_IDS, ids)
             .putString("$id.title", title)
             .putString("$id.url", url)
             .putInt("$id.slot", slot)
-            .apply()
+            .commit()
         return Site(id, title, url, slot)
     }
 
