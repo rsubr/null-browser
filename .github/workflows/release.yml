@@ -55,10 +55,13 @@ jobs:
         if: always()
         run: rm -f release-key.jks
 
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/null-browser.apk
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.name }}-${{ github.run_number }}
           name: Null Browser v${{ steps.version.outputs.name }} (build ${{ github.run_number }})
-          files: app/build/outputs/apk/release/app-release.apk
+          files: app/build/outputs/apk/release/null-browser.apk
           generate_release_notes: true
